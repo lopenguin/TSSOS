@@ -29,4 +29,5 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 SymbolicWedderburn = "858aa9a9-4c7c-4c62-b466-2421203962a2"
 
 [compat]
+DynamicPolynomials = "0.6.2"
 MultivariateBases = "0.2.2"

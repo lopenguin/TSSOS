@@ -82,8 +82,10 @@ Here the polynomial optimization problem is defined by `supp` and `coe`, corresp
 function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0, nb=0, CS="MF", cliques=[], basis=[], ebasis=[], TS="block", 
     merge=false, md=3, QUIET=false, solver="Mosek", dualize=false, solve=true, solution=false, MomentOne=false, Gram=false, 
     cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), writetofile=false, rtol=1e-2, gtol=1e-2, ftol=1e-3, pop=nothing, x=nothing, SkipRefinement=false)
-    println("*********************************** TSSOS ***********************************")
-    println("TSSOS is launching...")
+    if !QUIET
+        println("*********************************** TSSOS ***********************************")
+        println("TSSOS is launching...")
+    end
     m = length(supp) - 1
     supp[1],coe[1] = resort(supp[1], coe[1])
     dc = [maximum(length.(supp[i])) for i=2:m+1]
