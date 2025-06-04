@@ -90,8 +90,10 @@ function cs_tssos_first(supp::Vector{Vector{Vector{Vector{UInt16}}}}, coe, n, d;
     minimize=false, TS="block", merge=false, md=3, solver="Mosek", reducebasis=false, QUIET=false, solve=true, tune=false, solution=false, 
     ipart=true, dualize=false, balanced=false, MomentOne=false, Gram=false, Mommat=false, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), 
     writetofile=false, signsymmetry=false, normality=0, NormalSparse=false, cpop=nothing, z=nothing)
-    println("*********************************** TSSOS ***********************************")
-    println("TSSOS is launching...")
+    if !QUIET
+        println("*********************************** TSSOS ***********************************")
+        println("TSSOS is launching...")
+    end
     if nb > 0
         supp[1],coe[1] = resort(supp[1], coe[1], nb=nb)
     end
@@ -110,7 +112,7 @@ function cs_tssos_first(supp::Vector{Vector{Vector{Vector{UInt16}}}}, coe, n, d;
         cliquesize = length.(cliques)
     else
         time = @elapsed begin
-        cliques,cql,cliquesize = clique_decomp(n, m, dc, supp, order=d, alg=CS, minimize=minimize)
+        cliques,cql,cliquesize = clique_decomp(n, m, dc, supp, order=d, alg=CS, minimize=minimize; QUIET=QUIET)
         end
         if CS != false && QUIET == false
             mc = maximum(cliquesize)
@@ -219,9 +221,13 @@ function cs_tssos_first(supp::Vector{Vector{Vector{Vector{UInt16}}}}, coe, n, d;
             gap = abs(opt-ub)/max(1, abs(ub))
             if gap < 1e-4
                 flag = 0
-                @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
+                if !QUIET
+                    @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
+                end
             else
-                @printf "Found a locally optimal solution by Ipopt, giving an upper bound: %.8f.\nThe relative optimality gap is: %.6f%%.\n" ub 100*gap
+                if !QUIET
+                    @printf "Found a locally optimal solution by Ipopt, giving an upper bound: %.8f.\nThe relative optimality gap is: %.6f%%.\n" ub 100*gap
+                end
             end
         end
     end
@@ -1150,7 +1156,7 @@ function get_graph(tsupp::Vector{Vector{Vector{UInt16}}}, supp, basis; nb=0, bal
     return G
 end
 
-function clique_decomp(n, m, dc, supp::Vector{Vector{Vector{Vector{UInt16}}}}; order="min", alg="MF", minimize=false)
+function clique_decomp(n, m, dc, supp::Vector{Vector{Vector{Vector{UInt16}}}}; order="min", alg="MF", minimize=false, QUIET=false)
     if alg == false
         cliques = [UInt16[i for i=1:n]]
         cql = 1
@@ -1178,9 +1184,11 @@ function clique_decomp(n, m, dc, supp::Vector{Vector{Vector{Vector{UInt16}}}}; o
     end
     uc = unique(cliquesize)
     sizes = [sum(cliquesize.== i) for i in uc]
-    println("-----------------------------------------------------------------------------")
-    println("The clique sizes of varibles:\n$uc\n$sizes")
-    println("-----------------------------------------------------------------------------")
+    if !QUIET
+        println("-----------------------------------------------------------------------------")
+        println("The clique sizes of varibles:\n$uc\n$sizes")
+        println("-----------------------------------------------------------------------------")
+    end
     return cliques,cql,cliquesize
 end
 

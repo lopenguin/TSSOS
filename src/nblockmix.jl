@@ -59,11 +59,11 @@ If `MomentOne=true`, add an extra first order moment matrix to the moment relaxa
 """
 function cs_tssos_first(pop::Vector{Polynomial{true, T}}, x, d; nb=0, numeq=0, CS="MF", cliques=[], basis=[], hbasis=[], minimize=false, TS="block", merge=false, md=3, solver="Mosek", 
     tune=false, dualize=false, QUIET=false, solve=true, solution=false, Gram=false, MomentOne=false, Mommat=false, tol=1e-4, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), 
-    normality=false, NormalSparse=false) where {T<:Number}
+    normality=false, NormalSparse=false, SkipRefinement=false) where {T<:Number}
     n,supp,coe = polys_info(pop, x, nb=nb)
     opt,sol,data = cs_tssos_first(supp, coe, n, d, numeq=numeq, nb=nb, CS=CS, cliques=cliques, basis=basis, hbasis=hbasis, minimize=minimize, TS=TS,
     merge=merge, md=md, QUIET=QUIET, solver=solver, tune=tune, dualize=dualize, solve=solve, solution=solution, Gram=Gram, MomentOne=MomentOne,
-    Mommat=Mommat, tol=tol, cosmo_setting=cosmo_setting, mosek_setting=mosek_setting, normality=normality, NormalSparse=NormalSparse)
+    Mommat=Mommat, tol=tol, cosmo_setting=cosmo_setting, mosek_setting=mosek_setting, normality=normality, NormalSparse=NormalSparse, SkipRefinement=SkipRefinement)
     return opt,sol,data
 end
 
@@ -76,7 +76,7 @@ Here the polynomial optimization problem is defined by `supp` and `coe`, corresp
 """
 function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0, nb=0, CS="MF", cliques=[], basis=[], hbasis=[], minimize=false, 
     TS="block", merge=false, md=3, QUIET=false, solver="Mosek", tune=false, dualize=false, solve=true, solution=false, MomentOne=false, Gram=false, 
-    Mommat=false, tol=1e-4, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), normality=false, NormalSparse=false)
+    Mommat=false, tol=1e-4, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), normality=false, NormalSparse=false, SkipRefinement=false)
     println("*********************************** TSSOS ***********************************")
     println("TSSOS is launching...")
     m = length(supp) - 1
@@ -143,11 +143,11 @@ function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0
     cosmo_setting=cosmo_setting, mosek_setting=mosek_setting, normality=normality, NormalSparse=NormalSparse)
     data = mcpop_data(n, nb, m, numeq, supp, coe, basis, hbasis, ksupp, cql, cliquesize, cliques, I, J, ncc, cl, blocksize, blocks, eblocks, GramMat, multiplier_equality, moment, solver, SDP_status, tol, 1)
     sol = nothing
-    if solution == true
+    if solution == true && SkipRefinement == false
         sol,gap,data.flag = approx_sol(opt, moment, n, cliques, cql, cliquesize, supp, coe, numeq=numeq, tol=tol)
         if data.flag == 1
             sol = gap > 0.5 ? randn(n) : sol
-            sol,data.flag = refine_sol(opt, sol, data, QUIET=true, tol=tol)
+            sol,data.flag = refine_sol(opt, sol, data, QUIET=QUIET, tol=tol)
         end
     end
     return opt,sol,data

@@ -57,8 +57,8 @@ If `MomentOne=true`, add an extra first order moment matrix to the moment relaxa
 function tssos_first(pop::Vector{Polynomial{true, T}}, x, d; nb=0, numeq=0, quotient=true, basis=[], reducebasis=false, TS="block", merge=false, md=3, solver="Mosek", 
     QUIET=false, solve=true, dualize=false, MomentOne=false, Gram=false, solution=false, tol=1e-4, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), normality=0, 
     NormalSparse=false) where {T<:Number}
-    println("*********************************** TSSOS ***********************************")
-    println("TSSOS is launching...")
+    # println("*********************************** TSSOS ***********************************")
+    # println("TSSOS is launching...")
     n = length(x)
     if nb > 0
         gb = x[1:nb].^2 .- 1
@@ -791,7 +791,7 @@ function solvesdp(n, m, supp, coe, basis, hbasis, blocks, eblocks, cl, blocksize
            status = primal_status(model)
            println("solution status: $status")
         end
-        println("optimum = $objv")
+        # println("optimum = $objv")
         if Gram == true
             GramMat = Vector{Vector{Union{Float64,Matrix{Float64}}}}(undef, m-neq+1)
             GramMat[1] = [value.(pos[i]) for i = 1:cl[1]]
