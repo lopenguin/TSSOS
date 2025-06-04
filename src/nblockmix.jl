@@ -82,8 +82,10 @@ Here the polynomial optimization problem is defined by `supp` and `coe`, corresp
 function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0, nb=0, CS="MF", cliques=[], basis=[], ebasis=[], TS="block", 
     merge=false, md=3, QUIET=false, solver="Mosek", dualize=false, solve=true, solution=false, MomentOne=false, Gram=false, 
     cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), writetofile=false, rtol=1e-2, gtol=1e-2, ftol=1e-3, pop=nothing, x=nothing)
-    println("*********************************** TSSOS ***********************************")
-    println("TSSOS is launching...")
+    if !QUIET
+        println("*********************************** TSSOS ***********************************")
+        println("TSSOS is launching...")
+    end
     m = length(supp) - 1
     supp[1],coe[1] = resort(supp[1], coe[1])
     dc = [maximum(length.(supp[i])) for i=2:m+1]
@@ -93,7 +95,7 @@ function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0
     else
         time = @elapsed begin
         CS = CS == true ? "MF" : CS
-        cliques,cql,cliquesize = clique_decomp(n, m, numeq, dc, supp, order=d, alg=CS)
+        cliques,cql,cliquesize = clique_decomp(n, m, numeq, dc, supp, order=d, alg=CS; QUIET=QUIET)
         end
         if CS != false && QUIET == false
             mc = maximum(cliquesize)
@@ -430,7 +432,9 @@ function solvesdp(m, supp::Vector{Vector{Vector{UInt16}}}, coe, basis, ebasis, c
            status = primal_status(model)
            println("solution status: $status")
         end
-        println("optimum = $objv")
+        if QUIET == false
+            println("optimum = $objv")
+        end
         if Gram == true
             GramMat = Vector{Vector{Vector{Union{Float64,Matrix{Float64}}}}}(undef, cql)
             for i = 1:cql
@@ -554,7 +558,7 @@ function get_graph(tsupp::Vector{Vector{UInt16}}, supp::Vector{Vector{UInt16}}, 
     return G
 end
 
-function clique_decomp(n, m, numeq, dc, supp::Vector{Vector{Vector{UInt16}}}; order="min", alg="MF")
+function clique_decomp(n, m, numeq, dc, supp::Vector{Vector{Vector{UInt16}}}; order="min", alg="MF", QUIET=false)
     if alg == false
         cliques,cql,cliquesize = [UInt16[i for i=1:n]],1,[n]
     else
@@ -574,9 +578,11 @@ function clique_decomp(n, m, numeq, dc, supp::Vector{Vector{Vector{UInt16}}}; or
     end
     uc = unique(cliquesize)
     sizes = [sum(cliquesize.== i) for i in uc]
-    println("-----------------------------------------------------------------------------")
-    println("The clique sizes of varibles:\n$uc\n$sizes")
-    println("-----------------------------------------------------------------------------")
+    if !QUIET
+        println("-----------------------------------------------------------------------------")
+        println("The clique sizes of varibles:\n$uc\n$sizes")
+        println("-----------------------------------------------------------------------------")
+    end
     return cliques,cql,cliquesize
 end
 

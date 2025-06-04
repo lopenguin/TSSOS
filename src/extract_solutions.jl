@@ -355,10 +355,12 @@ function approx_sol(moment, lb, n, cliques, cql, cliquesize, supp, coe; numeq=0,
     gap = abs(lb-ub)/max(1, abs(ub))
     if check_optimality(sol, lb, supp, coe, numeq=numeq, gtol=gtol, ftol=ftol, QUIET=QUIET)
         flag = 0
-        println("------------------------------------------------")
-        @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
-        println("Successfully extracted one globally optimal solution.")
-        println("------------------------------------------------")
+        if !QUIET
+            println("------------------------------------------------")
+            @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
+            println("Successfully extracted one globally optimal solution.")
+            println("------------------------------------------------")
+        end
     end
     return sol,gap,flag
 end
