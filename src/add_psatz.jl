@@ -3,21 +3,20 @@ mutable struct struct_data
     cliquesize # size of cliques
     cliques # clique structrue
     basis # monomial basis
-    cl # number of blocks
     blocksize # size of blocks
     blocks # block structrue
     eblocks # block structrue for equality constraints
     tsupp # total support
     I # index sets of inequality constraints
     J # index sets of equality constraints
-    gram # Gram variables
-    multiplier_equality # multiplier variables for equality constraints
+    GramMat # Gram matrices
+    multiplier # multipliers for equality constraints
     constrs # constraint name
 end
 
 """
-model,info = add_psatz!(model, nonneg, vars, ineq_cons, eq_cons, order; CS=false, cliques=[], TS="block", 
-SO=1, Groebnerbasis=false, QUIET=false, constrs=nothing)
+    info = add_psatz!(model, nonneg, vars, ineq_cons, eq_cons, order; CS=false, cliques=[], TS="block", 
+    SO=1, GroebnerBasis=false, QUIET=false, constrs=nothing)
 
 Add a Putinar's style SOS representation of the polynomial `nonneg` to the JuMP `model`.
 
@@ -32,39 +31,42 @@ Add a Putinar's style SOS representation of the polynomial `nonneg` to the JuMP 
 - `cliques`: the set of cliques used in correlative sparsity
 - `TS`: type of term sparsity (`"block"`, `"signsymmetry"`, `"MD"`, `"MF"`, `false`)
 - `SO`: sparse order
-- `Groebnerbasis`: exploit the quotient ring structure or not (`true`, `false`)
+- `GroebnerBasis`: exploit the quotient ring structure or not (`true`, `false`)
 - `QUIET`: run in the quiet mode (`true`, `false`)
 - `constrs`: the constraint name used in the JuMP model
 
 # Output arguments
-- `model`: the modified JuMP model
-- `info`: other auxiliary data
+- `info`: auxiliary data
 """
-function add_psatz!(model, nonneg, vars, ineq_cons, eq_cons, order; CS=false, cliques=[], TS="block", SO=1, Groebnerbasis=false, QUIET=false, constrs=nothing)
+function add_psatz!(model, nonneg::DP.Polynomial{V, M, T}, vars, ineq_cons, eq_cons, order; CS=false, cliques=[], blocks=[], TS="block", SO=1, GroebnerBasis=false, QUIET=false, constrs=nothing) where {V, M, T<:Union{Number,AffExpr}}
     n = length(vars)
     m = length(ineq_cons)
     if ineq_cons != []
-        gsupp,gcoe,glt,dg = npolys_info(ineq_cons, vars)
+        gsupp,gcoe = npolys_info(ineq_cons, vars)
+        glt = length.(gcoe)
+        dg = maxdegree.(ineq_cons)
     else
         gsupp = Matrix{UInt8}[]
         glt = dg = Int[]
     end
     if eq_cons != []
-        hsupp,hcoe,hlt,dh = npolys_info(eq_cons, vars)
+        hsupp,hcoe = npolys_info(eq_cons, vars)
+        hlt = length.(hcoe)
+        dh = maxdegree.(ineq_cons)
     else
         hsupp = Matrix{UInt8}[]
         hlt = dh = Int[]
     end
-    if Groebnerbasis == true && eq_cons != []
+    if GroebnerBasis == true && eq_cons != []
         l = 0
-        gb = convert.(Polynomial{true,Float64}, eq_cons)
-        SemialgebraicSets.gröbnerbasis!(gb)
+        gb = convert.(DP.Polynomial{V, M, Float64}, eq_cons)
+        SemialgebraicSets.gröbner_basis!(gb)
         nonneg = rem(nonneg, gb)
-        leadm = leadingmonomial.(gb)
+        leadm = SemialgebraicSets.leading_monomial.(gb)
         llead = length(leadm)
         lead = zeros(UInt8, n, llead)
         for i = 1:llead, j = 1:n
-            @inbounds lead[j,i] = MultivariatePolynomials.degree(leadm[i], vars[j])
+            @inbounds lead[j,i] = MP.degree(leadm[i], vars[j])
         end
     else
         gb = []
@@ -73,7 +75,8 @@ function add_psatz!(model, nonneg, vars, ineq_cons, eq_cons, order; CS=false, cl
     fsupp,fcoe = poly_info(nonneg, vars)
     if CS != false
         if cliques == []
-            cliques,cql,cliquesize = clique_decomp(n, m, length(eq_cons), fsupp, gsupp, hsupp, alg=CS, QUIET=false)
+            CS = CS == true ? "MF" : CS
+            cliques,cql,cliquesize = clique_decomp(n, m, length(eq_cons), fsupp, gsupp, hsupp, alg=CS, QUIET=QUIET)
         else
             cql = length(cliques)
             cliquesize = length.(cliques)
@@ -98,15 +101,21 @@ function add_psatz!(model, nonneg, vars, ineq_cons, eq_cons, order; CS=false, cl
     basis = Vector{Vector{Matrix{UInt8}}}(undef, cql)
     for t = 1:cql
         basis[t] = Vector{Matrix{UInt8}}(undef, length(I[t])+length(J[t])+1)
-        basis[t][1] = get_nbasis(n, order, var=cliques[t])
+        basis[t][1] = get_basis(n, order, var=cliques[t])
         for s = 1:length(I[t])
-            basis[t][s+1] = get_nbasis(n, order-ceil(Int, dg[I[t][s]]/2), var=cliques[t])
+            basis[t][s+1] = get_basis(n, order-ceil(Int, dg[I[t][s]]/2), var=cliques[t])
         end
         for s = 1:length(J[t])
-            basis[t][s+length(I[t])+1] = get_nbasis(n, 2*order-dh[J[t][s]], var=cliques[t])
+            basis[t][s+length(I[t])+1] = get_basis(n, 2*order-dh[J[t][s]], var=cliques[t])
         end
     end
-    blocks,cl,blocksize,eblocks = get_blocks(n, I, J, m, l, fsupp, gsupp, hsupp, basis, cliques, cql, tsupp=[], TS=TS, SO=SO, QUIET=QUIET, signsymmetry=ss)
+    if isempty(blocks)
+        blocks,cl,blocksize,eblocks = get_blocks(n, I, J, m, l, fsupp, gsupp, hsupp, basis, cliques, cql, tsupp=[], TS=TS, SO=SO, signsymmetry=ss)
+    else
+        eblocks = nothing
+        blocksize = [[length.(blocks[1][i]) for i = 1:length(blocks[1])]]
+        cl = [length.(blocksize[1])]
+    end
     ne = 0
     for t = 1:cql
         ne += sum(numele(blocksize[t][1]))
@@ -158,6 +167,7 @@ function add_psatz!(model, nonneg, vars, ineq_cons, eq_cons, order; CS=false, cl
     ltsupp = size(tsupp, 2)
     cons = [AffExpr(0) for i=1:ltsupp]
     pos = Vector{Vector{Vector{Union{VariableRef,Symmetric{VariableRef}}}}}(undef, cql)
+    mul = nothing
     if l > 0
         mul = Vector{Vector{Vector{VariableRef}}}(undef, cql)
     end
@@ -237,7 +247,7 @@ function add_psatz!(model, nonneg, vars, ineq_cons, eq_cons, order; CS=false, cl
                                     @inbounds add_to_expression!(cons[Locb], 2*gcoe[I[t][k]][s]*bi_coe[z], pos[t][k+1][i][j,r])
                                 end
                             end
-                       else
+                        else
                             Locb = bfind(tsupp, ltsupp, bi)
                             if j == r
                                 @inbounds add_to_expression!(cons[Locb], gcoe[I[t][k]][s], pos[t][k+1][i][j,r])
@@ -267,18 +277,17 @@ function add_psatz!(model, nonneg, vars, ineq_cons, eq_cons, order; CS=false, cl
         Locb = bfind(tsupp, ltsupp, fsupp[:, i])
         if Locb === nothing
             @error "The monomial basis is not enough!"
-            return model,info
         else
             bc[Locb] = fcoe[i]
         end
     end
     if constrs !== nothing
-        @constraint(model, [i=1:ltsupp], cons[i]==bc[i], base_name=constrs)
+        @constraint(model, cons==bc, base_name=constrs)
     else
-        @constraint(model, cons.==bc)
+        @constraint(model, cons==bc)
     end
-    info = struct_data(cql,cliquesize,cliques,basis,cl,blocksize,blocks,eblocks,tsupp,I,J,pos,mul,constrs)
-    return model,info
+    info = struct_data(cql, cliquesize, cliques, basis, blocksize, blocks, eblocks, tsupp, I, J, pos, mul, constrs)
+    return info
 end
 
 function clique_decomp(n, m, l, fsupp::Matrix{UInt8}, gsupp::Vector{Matrix{UInt8}}, hsupp::Vector{Matrix{UInt8}}; alg="MF", QUIET=false)
@@ -316,8 +325,8 @@ function clique_decomp(n, m, l, fsupp::Matrix{UInt8}, gsupp::Vector{Matrix{UInt8
 end
 
 function assign_constraint(m, l, gsupp::Vector{Matrix{UInt8}}, hsupp::Vector{Matrix{UInt8}}, cliques, cql)
-    I = [UInt32[] for i=1:cql]
-    J = [UInt32[] for i=1:cql]
+    I = [Int[] for i=1:cql]
+    J = [Int[] for i=1:cql]
     for i = 1:m
         rind = findall(gsupp[i][:,1] .!= 0)
         for j = 2:size(gsupp[i], 2)
@@ -339,9 +348,9 @@ function assign_constraint(m, l, gsupp::Vector{Matrix{UInt8}}, hsupp::Vector{Mat
     return I,J
 end
 
-function get_blocks(n, I, J, m, l, fsupp::Matrix{UInt8}, gsupp::Vector{Matrix{UInt8}}, hsupp::Vector{Matrix{UInt8}}, basis, cliques, cql; tsupp=[], TS="block", SO=1, QUIET=false, signsymmetry=nothing)
-    blocks = Vector{Vector{Vector{Vector{UInt16}}}}(undef, cql)
-    eblocks = Vector{Vector{Vector{UInt16}}}(undef, cql)
+function get_blocks(n, I, J, m, l, fsupp::Matrix{UInt8}, gsupp::Vector{Matrix{UInt8}}, hsupp::Vector{Matrix{UInt8}}, basis, cliques, cql; tsupp=[], TS="block", SO=1, signsymmetry=nothing)
+    blocks = Vector{Vector{Vector{Vector{Int}}}}(undef, cql)
+    eblocks = Vector{Vector{Vector{Int}}}(undef, cql)
     cl = Vector{Vector{Int}}(undef, cql)
     blocksize = Vector{Vector{Vector{Int}}}(undef, cql)
     status = ones(Int, cql)
@@ -362,8 +371,8 @@ function get_blocks(n, I, J, m, l, fsupp::Matrix{UInt8}, gsupp::Vector{Matrix{UI
         supp = [tsupp[:, ind] UInt8(2)*basis[i][1]]
         supp = sortslices(supp, dims=2)
         supp = unique(supp, dims=2)
-        blocks[i] = Vector{Vector{Vector{UInt16}}}(undef, lc+1)
-        eblocks[i] = Vector{Vector{UInt16}}(undef, length(J[i]))
+        blocks[i] = Vector{Vector{Vector{Int}}}(undef, lc+1)
+        eblocks[i] = Vector{Vector{Int}}(undef, length(J[i]))
         cl[i] = Vector{Int}(undef, lc+1)
         blocksize[i] = Vector{Vector{Int}}(undef, lc+1)
         blocks[i],cl[i],blocksize[i],eblocks[i],status[i] = get_blocks(n, lc, length(J[i]), supp, [gsupp[I[i]]; hsupp[J[i]]], basis[i], TS=TS, SO=SO, signsymmetry=signsymmetry)
@@ -375,8 +384,8 @@ function get_blocks(n, I, J, m, l, fsupp::Matrix{UInt8}, gsupp::Vector{Matrix{UI
 end
 
 function get_blocks(n::Int, m::Int, l::Int, tsupp, supp::Vector{Array{UInt8, 2}}, basis::Vector{Array{UInt8, 2}}; TS="block", SO=1, merge=false, md=3, signsymmetry=nothing)
-    blocks = Vector{Vector{Vector{UInt16}}}(undef, m+1)
-    eblocks = Vector{Vector{UInt16}}(undef, l)
+    blocks = Vector{Vector{Vector{Int}}}(undef, m+1)
+    eblocks = Vector{Vector{Int}}(undef, l)
     blocksize = Vector{Vector{Int}}(undef, m+1)
     cl = Vector{Int}(undef, m+1)
     status = 0
@@ -432,24 +441,24 @@ function get_blocks(n::Int, m::Int, l::Int, tsupp, supp::Vector{Array{UInt8, 2}}
     return blocks,cl,blocksize,eblocks,status
 end
 
-function get_moment(n, tsupp, lb, ub)
-    ltsupp = size(tsupp, 2)
-    moment = zeros(ltsupp)
-    for i = 1:ltsupp
-        moment[i] = prod([(ub[j]^(tsupp[j,i]+1)-lb[j]^(tsupp[j,i]+1))/(tsupp[j,i]+1) for j=1:n])
-    end
-    return moment
+function get_moment(supp::Array{UInt8, 2}, lb, ub)
+    return [prod([(ub[j]^(item[j]+1)-lb[j]^(item[j]+1))/(item[j]+1) for j=1:length(lb)]) for item in eachcol(supp)]
 end
 
-function get_moment_matrix(moment, tsupp, cql, basis)
-    MomMat = Vector{Union{Float64, Symmetric{Float64}, Array{Float64,2}}}(undef, cql)
-    ltsupp = size(tsupp, 2)
-    for i = 1:cql
-        lb = size(basis[i][1], 2)
+function get_moment(mons::Vector{DP.Monomial{V, M}}, lb, ub) where {V, M}
+    supp = exponents.(mons)
+    return [prod([(ub[j]^(item[j]+1)-lb[j]^(item[j]+1))/(item[j]+1) for j=1:length(lb)]) for item in supp]
+end
+
+function get_moment_matrix(moment, info)
+    MomMat = Vector{Union{Float64, Symmetric{Float64}, Array{Float64,2}}}(undef, info.cql)
+    ltsupp = size(info.tsupp, 2)
+    for i = 1:info.cql
+        lb = size(info.basis[i][1], 2)
         MomMat[i] = zeros(Float64, lb, lb)
         for j = 1:lb, k = j:lb
-            bi = basis[i][1][:, j] + basis[i][1][:, k]
-            Locb = bfind(tsupp, ltsupp, bi)
+            bi = info.basis[i][1][:, j] + info.basis[i][1][:, k]
+            Locb = bfind(info.tsupp, ltsupp, bi)
             if Locb !== nothing
                 MomMat[i][j,k] = moment[Locb]
             end

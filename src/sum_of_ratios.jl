@@ -1,5 +1,5 @@
 """
-optimum = SumOfRatios(p, q, g, h, x, d; QUIET=false, SignSymmetry=true, Groebnerbasis=false)
+    optimum = SumOfRatios(p, q, g, h, x, d; QUIET=false, SignSymmetry=true, GroebnerBasis=false)
 
 Minimizing the sum of ratios p1/q1 + ... + pN/qN on the set defined by g >= 0 and h == 0.
 
@@ -13,9 +13,9 @@ Minimizing the sum of ratios p1/q1 + ... + pN/qN on the set defined by g >= 0 an
 
 # Output arguments
 - `SignSymmetry`: exploit sign symmetries or not (`true`, `false`)
-- `Groebnerbasis`: exploit the quotient ring structure or not (`true`, `false`)
+- `GroebnerBasis`: exploit the quotient ring structure or not (`true`, `false`)
 """
-function SumOfRatios(p, q, g, h, x, d; QUIET=false, SignSymmetry=true, Groebnerbasis=false)
+function SumOfRatios(p, q, g, h, x, d; QUIET=false, dualize=false, SignSymmetry=true, mosek_setting=mosek_para(), GroebnerBasis=false)
     println("*********************************** TSSOS ***********************************")
     println("TSSOS is launching...")
     N = length(p)
@@ -34,15 +34,20 @@ function SumOfRatios(p, q, g, h, x, d; QUIET=false, SignSymmetry=true, Groebnerb
     end
     dq = maxdegree.(q)
     time = @elapsed begin
-    model = Model(optimizer_with_attributes(Mosek.Optimizer))
+    if dualize == false
+        model = Model(optimizer_with_attributes(Mosek.Optimizer, "MSK_DPAR_INTPNT_CO_TOL_PFEAS" => mosek_setting.tol_pfeas, "MSK_DPAR_INTPNT_CO_TOL_DFEAS" => mosek_setting.tol_dfeas, 
+                "MSK_DPAR_INTPNT_CO_TOL_REL_GAP" => mosek_setting.tol_relgap, "MSK_DPAR_OPTIMIZER_MAX_TIME" => mosek_setting.time_limit, "MSK_IPAR_NUM_THREADS" => mosek_setting.num_threads))
+    else
+        model = Model(dual_optimizer(Mosek.Optimizer))
+    end
     set_optimizer_attribute(model, MOI.Silent(), QUIET)
     hh = Vector{Polynomial{true, AffExpr}}(undef, N-1)
     for i = 1:N-1
         hh[i] = add_poly!(model, x, 2d-max(dq[i], dq[N]), signsymmetry=ss)[1]
-        add_psatz!(model, p[i]-hh[i]*q[i], x, g, h, d, QUIET=QUIET, CS=false, TS=TS, Groebnerbasis=Groebnerbasis)
+        add_psatz!(model, p[i]-hh[i]*q[i], x, g, h, d, QUIET=QUIET, CS=false, TS=TS, GroebnerBasis=GroebnerBasis)
     end
     c = @variable(model)
-    add_psatz!(model, p[N]+(sum(hh)-c)*q[N], x, g, h, d, QUIET=QUIET, CS=false, TS=TS, Groebnerbasis=Groebnerbasis)
+    add_psatz!(model, p[N]+(sum(hh)-c)*q[N], x, g, h, d, QUIET=QUIET, CS=false, TS=TS, GroebnerBasis=GroebnerBasis)
     @objective(model, Max, c)
     optimize!(model)
     status = termination_status(model)
@@ -59,7 +64,7 @@ function SumOfRatios(p, q, g, h, x, d; QUIET=false, SignSymmetry=true, Groebnerb
 end
 
 """
-optimum = SparseSumOfRatios(p, q, g, h, x, d; QUIET=false, SignSymmetry=true, Groebnerbasis=false)
+    optimum = SparseSumOfRatios(p, q, g, h, x, d; QUIET=false, SignSymmetry=true, GroebnerBasis=false)
 
 Minimizing the sum of sparse ratios p1/q1 + ... + pN/qN on the set defined by g >= 0 and h == 0.
 
@@ -73,9 +78,9 @@ Minimizing the sum of sparse ratios p1/q1 + ... + pN/qN on the set defined by g 
 
 # Output arguments
 - `SignSymmetry`: exploit sign symmetries or not (`true`, `false`)
-- `Groebnerbasis`: exploit the quotient ring structure or not (`true`, `false`)
+- `GroebnerBasis`: exploit the quotient ring structure or not (`true`, `false`)
 """
-function SparseSumOfRatios(p, q, g, h, x, d; QUIET=false, SignSymmetry=true, Groebnerbasis=false)
+function SparseSumOfRatios(p, q, g, h, x, d; QUIET=false, dualize=false, SignSymmetry=true, mosek_setting=mosek_para(), GroebnerBasis=false)
     println("*********************************** TSSOS ***********************************")
     println("TSSOS is launching...")
     N = length(p)
@@ -107,7 +112,12 @@ function SparseSumOfRatios(p, q, g, h, x, d; QUIET=false, SignSymmetry=true, Gro
     U = [findall(j->!isempty(intersect(I[i], I[j])), i+1:N) .+ i for i=1:N-1]
     V = [findall(j->!isempty(intersect(I[i], I[j])), 1:i-1) for i=2:N]
     time = @elapsed begin
-    model = Model(optimizer_with_attributes(Mosek.Optimizer))
+    if dualize == false
+        model = Model(optimizer_with_attributes(Mosek.Optimizer, "MSK_DPAR_INTPNT_CO_TOL_PFEAS" => mosek_setting.tol_pfeas, "MSK_DPAR_INTPNT_CO_TOL_DFEAS" => mosek_setting.tol_dfeas, 
+                "MSK_DPAR_INTPNT_CO_TOL_REL_GAP" => mosek_setting.tol_relgap, "MSK_DPAR_OPTIMIZER_MAX_TIME" => mosek_setting.time_limit, "MSK_IPAR_NUM_THREADS" => mosek_setting.num_threads))
+    else
+        model = Model(dual_optimizer(Mosek.Optimizer))
+    end
     set_optimizer_attribute(model, MOI.Silent(), QUIET)
     hh = Vector{Vector{Polynomial{true, AffExpr}}}(undef, N)
     for i = 1:N-1
@@ -131,7 +141,7 @@ function SparseSumOfRatios(p, q, g, h, x, d; QUIET=false, SignSymmetry=true, Gro
             ind = [bfind(U[j], length(U[j]), i) for j in V[i-1]]
             temp = sum(hh[V[i-1][j]][ind[j]] for j=1:length(V[i-1]))
         end
-        add_psatz!(model, p[i]-(c[i]+sum(hh[i])-temp)*q[i], I[i], g[J[i]], h[K[i]], d, QUIET=QUIET, CS=false, TS=TS, Groebnerbasis=Groebnerbasis)
+        add_psatz!(model, p[i]-(c[i]+sum(hh[i])-temp)*q[i], I[i], g[J[i]], h[K[i]], d, QUIET=QUIET, CS=false, TS=TS, GroebnerBasis=GroebnerBasis)
     end 
     @objective(model, Max, sum(c))
     end

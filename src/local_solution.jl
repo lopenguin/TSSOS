@@ -18,8 +18,7 @@ Compute a local solution by a local solver.
 - `sol`: local solution
 - `status`: solver termination status
 """
-function local_solution(n, m, supp::Vector{Vector{Vector{UInt16}}}, coe; nb=0, numeq=0,
-    startpoint=[], QUIET=false)
+function local_solution(n, m, supp::Vector{Vector{Vector{UInt16}}}, coe; nb=0, numeq=0, startpoint=[], QUIET=false)
     model = Model(optimizer_with_attributes(Ipopt.Optimizer))
     set_optimizer_attribute(model, MOI.Silent(), QUIET)
     if QUIET == true
@@ -49,8 +48,7 @@ function local_solution(n, m, supp::Vector{Vector{Vector{UInt16}}}, coe; nb=0, n
     return objv,value.(x),status
 end
 
-function local_solution(n, m, supp::Vector{Array{UInt8, 2}}, coe; nb=0, numeq=0,
-    startpoint=[], QUIET=false)
+function local_solution(n, m, supp::Vector{Array{UInt8, 2}}, coe; nb=0, numeq=0, startpoint=[], QUIET=false)
     model = Model(optimizer_with_attributes(Ipopt.Optimizer))
     set_optimizer_attribute(model, MOI.Silent(), QUIET)
     if QUIET == true
@@ -81,53 +79,27 @@ function local_solution(n, m, supp::Vector{Array{UInt8, 2}}, coe; nb=0, numeq=0,
 end
 
 """
-    ref_sol,flag = refine_sol(opt, sol, data, QUIET=false, tol=1e-4)
+    ref_sol,flag = refine_sol(opt, sol, data, QUIET=false, tol=1e-2)
 
 Refine the obtained solution by a local solver.
 Return the refined solution, and `flag=0` if global optimality is certified, `flag=1` otherwise.
 """
-function refine_sol(opt, sol, data::upop_data; QUIET=false, tol=1e-4)
-    n = data.n
-    nb = data.nb
-    supp = data.supp
-    coe = data.coe
-    for i = 1:n
-        if abs(sol[i]) < 1e-10
-            sol[i] = 1e-10
-        end
-    end
-    ub,rsol,status = local_solution(n, 0, [supp], [coe], nb=nb, numeq=0, startpoint=sol, QUIET=QUIET)
-    if status == MOI.LOCALLY_SOLVED
-        gap = abs(opt-ub)/max(1, abs(ub))
-        if gap < tol
-            @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
-            return rsol,0
-        else
-            @printf "Found a locally optimal solution by Ipopt, giving an upper bound: %.8f.\nThe relative optimality gap is: %.6f%%.\n" ub 100*gap
-            return rsol,1
-        end
-    else
-        println("The local solver failed refining the solution!")
-        return sol,1
-    end
-end
-
-function refine_sol(opt, sol, data::Union{cpop_data,mcpop_data}; QUIET=false, tol=1e-4)
+function refine_sol(opt, sol, data::Union{cpop_data,mcpop_data}; QUIET=false, gtol=1e-2)
     n = data.n
     nb = data.nb
     numeq = data.numeq
     if typeof(data) == cpop_data && !isempty(data.gb)
-        m = length(data.pop)-1
+        m = length(data.pop) - 1
         supp = Vector{Array{UInt8,2}}(undef, m+1)
         coe = Vector{Vector{Float64}}(undef, m+1)
         supp[2:m+1-numeq] = data.supp[2:end]
         coe[2:m+1-numeq] = data.coe[2:end]
         for k in [1; [k for k=m+2-numeq:m+1]]
-            mons = MultivariatePolynomials.monomials(data.pop[k])
-            coe[k] = MultivariatePolynomials.coefficients(data.pop[k])
+            mons = MP.monomials(data.pop[k])
+            coe[k] = MP.coefficients(data.pop[k])
             supp[k] = zeros(UInt8, n, length(mons))
             for i in eachindex(mons), j = 1:n
-                @inbounds supp[k][j,i] = MultivariatePolynomials.degree(mons[i], data.x[j])
+                @inbounds supp[k][j,i] = MP.degree(mons[i], data.x[j])
             end
         end
     else
@@ -143,8 +115,11 @@ function refine_sol(opt, sol, data::Union{cpop_data,mcpop_data}; QUIET=false, to
     ub,rsol,status = local_solution(n, m, supp, coe, nb=nb, numeq=numeq, startpoint=sol, QUIET=QUIET)
     if status == MOI.LOCALLY_SOLVED
         gap = abs(opt-ub)/max(1, abs(ub))
-        if gap < tol
+        if gap < gtol
+            println("------------------------------------------------")
             @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
+            println("Successfully extracted one globally optimal solution.")
+            println("------------------------------------------------")
             return rsol,0
         else
             @printf "Found a locally optimal solution by Ipopt, giving an upper bound: %.8f.\nThe relative optimality gap is: %.6f%%.\n" ub 100*gap

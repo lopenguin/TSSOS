@@ -3,7 +3,7 @@ using TSSOS
 using Random
 
 function cbasis(z)
-    basis = Monomial{true}[1]
+    basis = Poly{Int}[1]
     for i = 1:length(z)
         push!(basis, z[i])
     end
@@ -15,40 +15,40 @@ end
 
 # minimizing a random complex quartic polynomial over the unit sphere
 Random.seed!(1)
-n = 5
-@polyvar z[1:2n]
-basis1 = cbasis(z[1:n])
-basis2 = cbasis(z[n+1:2n])
-P = randn(length(basis1), length(basis1))
-Q = randn(length(basis1), length(basis1))
-f = basis2'*((P+P')/2+im*(Q-Q')/2)*basis1
-h = sum(z[i]*z[i+n] for i = 1:n) - 1
-@time begin
-opt,sol,data = cs_tssos_first([f; h], z, n, 2, numeq=1, QUIET=false, solve=true, CS=false, TS=false)
-end
-# println(length(data.basis[1][1]))
-@time begin
-opt,sol,data = cs_tssos_first([f; h], z, n, 3, numeq=1, QUIET=false, solve=true, CS=false, TS=false)
-end
-# println(length(data.basis[1][1]))
+n = 10
+@complex_polyvar z[1:n]
+basis = cbasis(z)
+P = randn(length(basis), length(basis))
+Q = randn(length(basis), length(basis))
+f = basis'*((P+P')/2+im*(Q-Q')/2)*basis
+@time opt,sol,data = complex_tssos_first([f; z'*z - 1], z, 2, numeq=1, QUIET=true, solve=true, TS=false)
+@time opt,sol,data = complex_tssos_first([f; z'*z - 1], z, 3, numeq=1, QUIET=true, solve=true, TS=false)
+
+using LinearAlgebra
+Random.seed!(1)
+n = 1
+@complex_polyvar x
+basis = cbasis([x])
+P = rand(length(basis), length(basis))
+# Q = rand(length(basis), length(basis))
+# A = (P+P')/2 + im*(Q-Q')/2 + 3*I(length(basis))
+A = (P+P')/2 + I(length(basis))
+A = [0 1 1; 1 1 0; 1 0 1]
+f = basis'*A*basis + 0.5
+@time opt,sol,data = complex_tssos_first([f], [x], 2, QUIET=true, normality=0, ConjugateBasis=false, TS=false)
+@time opt,sol,data = complex_tssos_first([f], [x], 2, QUIET=true, ConjugateBasis=true, Gram=true, TS=false)
 
 # minimizing a random complex quartic polynomial with unit-norm variables
 Random.seed!(1)
-n = 15
-@polyvar z[1:2n]
-basis1 = cbasis(z[1:n])
-basis2 = cbasis(z[n+1:2n])
-P = rand(length(basis1), length(basis1))
-Q = rand(length(basis1), length(basis1))
-pop = [basis2'*((P+P')/2+im*(Q-Q')/2)*basis1]
-@time begin
-opt,sol,data = cs_tssos_first(pop, z, n, 2, nb=n, QUIET=false, CS=false, TS=false)
-end
-# println(length(data.basis[1][1]))
-@time begin
-opt,sol,data = cs_tssos_first(pop, z, n, 3, nb=n, QUIET=false, solve=true, CS=false, TS=false)
-end
-# println(length(data.basis[1][1]))
+n = 5
+@complex_polyvar z[1:n]
+basis = cbasis(z)
+P = rand(length(basis), length(basis))
+Q = rand(length(basis), length(basis))
+pop = [basis'*((P+P')/2+im*(Q-Q')/2)*basis]
+# pop = [basis'*((P+P')/2)*basis]
+@time opt1,sol,data = complex_tssos_first(pop, z, 2, nb=n, QUIET=true, CS=false, ConjugateBasis=false)
+@time opt2,sol,data = complex_tssos_first(pop, z, 2, nb=n, QUIET=true, CS=false, ConjugateBasis=true)
 
 # minimizing large-scale randomly generated complex QCQPs
 Random.seed!(1)
@@ -86,18 +86,14 @@ for i = 1:l
     coe[i+1] = [1; -ones(b)]
 end
 
-@time begin
-opt,sol,data = cs_tssos_first(supp, coe, n, 2, numeq=l, TS="MD")
-end
-# mb = 2*maximum(maximum.(data.sb)) # maximal block size
-# println("n = $n, time = $time, mb = $mb")
+@time opt,sol,data = complex_cs_tssos_first(supp, coe, n, 2, numeq=l, TS="MD")
 
 # AC-OPF problem
 include("D:/Programs/TSSOS/example/modelopf.jl")
 cd("D:/Programs/PolyOPF/pglib")
 silence()
 
-case = "pglib_opf_case14_ieee"
+case = "pglib_opf_case30_as"
 AC = 2178.08
 opfdata = parse_file(case * ".m")
 model = pop_opf_com_vol(opfdata, normal=true, AngleCons=true, LineLimit=true)
@@ -109,12 +105,12 @@ coe = model.coe
 mc = maximum(abs.(coe[1]))
 coe[1] = coe[1]./mc
 
-time = @elapsed begin
-opt,sol,popd = cs_tssos_first(supp, coe, n, "min", numeq=numeq, tune=true, CS="MF", TS="block", MomentOne=false)
+t = @elapsed begin
+opt,_,popd = complex_cs_tssos_first(supp, coe, n, "min", numeq=numeq, CS="MF", TS="block", QUIET=true, MomentOne=false)
 end
 opt *= mc
 maxc = maximum(popd.cliquesize) # maximal clique size
 mb = 2*maximum(maximum.([maximum.(popd.blocksize[i]) for i = 1:popd.cql])) # maximal block size
 gap = 100*(AC-opt)/AC # optimality gap
 println("n = $n, m = $m")
-println("mc = $maxc, opt = $opt, time = $time, mb = $mb, gap = $gap%")
+println("mc = $maxc, opt = $opt, time = $t, mb = $mb, gap = $gap%")
