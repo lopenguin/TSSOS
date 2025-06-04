@@ -65,10 +65,10 @@ function cs_tssos_first(pop::Vector{P}, x, d; nb=0, numeq=0, CS="MF", cliques=[]
     dualize=false, QUIET=false, solve=true, solution=false, Gram=false, MomentOne=false, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), 
     writetofile=false, rtol=1e-2, gtol=1e-2, ftol=1e-3) where {P<:AbstractPolynomial}
     supp,coe = polys_info(pop, x, nb=nb)
-    opt,sol,data = cs_tssos_first(supp, coe, length(x), d, numeq=numeq, nb=nb, CS=CS, cliques=cliques, basis=basis, ebasis=ebasis, TS=TS,
+    opt,sol,gap,data = cs_tssos_first(supp, coe, length(x), d, numeq=numeq, nb=nb, CS=CS, cliques=cliques, basis=basis, ebasis=ebasis, TS=TS,
     merge=merge, md=md, QUIET=QUIET, solver=solver, dualize=dualize, solve=solve, solution=solution, Gram=Gram, MomentOne=MomentOne,
     cosmo_setting=cosmo_setting, mosek_setting=mosek_setting, writetofile=writetofile, rtol=rtol, gtol=gtol, ftol=ftol, pop=pop, x=x)
-    return opt,sol,data
+    return opt,sol,gap,data
 end
 
 """
@@ -152,6 +152,7 @@ function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0
     data = mcpop_data(pop, x, n, nb, m, numeq, supp, coe, basis, ebasis, ksupp, cql, cliquesize, cliques, I, J, ncc, blocksize, blocks, eblocks, GramMat, 
     multiplier, moment, solver, SDP_status, rtol, gtol, ftol, 1)
     sol = nothing
+    gap = nothing
     if solution == true
         if TS != false
             sol,gap,data.flag = approx_sol(momone, opt, n, cliques, cql, cliquesize, supp, coe, numeq=numeq, gtol=gtol, ftol=ftol, QUIET=true)
@@ -166,7 +167,7 @@ function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0
             end
         end
     end
-    return opt,sol,data
+    return opt,sol,gap,data
 end
 
 """
