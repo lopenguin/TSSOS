@@ -62,11 +62,11 @@ If `MomentOne=true`, add an extra first-order moment PSD constraint to the momen
 - `data`: other auxiliary data 
 """
 function cs_tssos_first(pop::Vector{P}, x, d; nb=0, numeq=0, CS="MF", cliques=[], basis=[], ebasis=[], TS="block", merge=false, md=3, solver="Mosek", 
-    dualize=false, QUIET=false, solve=true, solution=false, Gram=false, MomentOne=false, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), 
+    dualize=false, QUIET=false, solve=true, solution=false, Gram=false, MomentOne=false, refine=true, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), 
     writetofile=false, rtol=1e-2, gtol=1e-2, ftol=1e-3) where {P<:AbstractPolynomial}
     supp,coe = polys_info(pop, x, nb=nb)
     opt,sol,gap,data = cs_tssos_first(supp, coe, length(x), d, numeq=numeq, nb=nb, CS=CS, cliques=cliques, basis=basis, ebasis=ebasis, TS=TS,
-    merge=merge, md=md, QUIET=QUIET, solver=solver, dualize=dualize, solve=solve, solution=solution, Gram=Gram, MomentOne=MomentOne,
+    merge=merge, md=md, QUIET=QUIET, solver=solver, dualize=dualize, solve=solve, solution=solution, Gram=Gram, MomentOne=MomentOne, refine=refine,
     cosmo_setting=cosmo_setting, mosek_setting=mosek_setting, writetofile=writetofile, rtol=rtol, gtol=gtol, ftol=ftol, pop=pop, x=x)
     return opt,sol,gap,data
 end
@@ -80,7 +80,7 @@ Compute the first TS step of the CS-TSSOS hierarchy for constrained polynomial o
 Here the polynomial optimization problem is defined by `supp` and `coe`, corresponding to the supports and coeffients of `pop` respectively.
 """
 function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0, nb=0, CS="MF", cliques=[], basis=[], ebasis=[], TS="block", 
-    merge=false, md=3, QUIET=false, solver="Mosek", dualize=false, solve=true, solution=false, MomentOne=false, Gram=false, 
+    merge=false, md=3, QUIET=false, solver="Mosek", dualize=false, solve=true, solution=false, MomentOne=false, Gram=false, refine=true,
     cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), writetofile=false, rtol=1e-2, gtol=1e-2, ftol=1e-3, pop=nothing, x=nothing)
     if !QUIET
         println("*********************************** TSSOS ***********************************")
@@ -155,10 +155,10 @@ function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0
     gap = nothing
     if solution == true
         if TS != false
-            sol,gap,data.flag = approx_sol(momone, opt, n, cliques, cql, cliquesize, supp, coe, numeq=numeq, gtol=gtol, ftol=ftol, QUIET=true)
-            if data.flag == 1
+            sol,gap,data.flag = approx_sol(momone, opt, n, cliques, cql, cliquesize, supp, coe, numeq=numeq, gtol=gtol, ftol=ftol, QUIET=QUIET)
+            if data.flag == 1 && refine == true
                 sol = gap > 0.5 ? randn(n) : sol
-                sol,data.flag = refine_sol(opt, sol, data, QUIET=true, gtol=gtol)
+                sol,data.flag = refine_sol(opt, sol, data, QUIET=QUIET, gtol=gtol)
             end
         else
             sol = extract_solutions_robust(moment, n, d, cliques, cql, cliquesize, pop=pop, x=x, supp=supp, coe=coe, lb=opt, numeq=numeq, check=true, rtol=rtol, gtol=gtol, ftol=ftol, QUIET=QUIET)[1]
