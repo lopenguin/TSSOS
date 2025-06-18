@@ -428,9 +428,11 @@ function solvesdp(m, supp::Vector{Vector{Vector{UInt16}}}, coe, basis, ebasis, c
         SDP_status = termination_status(model)
         objv = objective_value(model)
         if SDP_status != MOI.OPTIMAL
-           println("termination status: $SDP_status")
-           status = primal_status(model)
-           println("solution status: $status")
+            if !QUIET
+                println("termination status: $SDP_status")
+                status = primal_status(model)
+                println("solution status: $status")
+            end
         end
         if QUIET == false
             println("optimum = $objv")
