@@ -116,17 +116,23 @@ function refine_sol(opt, sol, data::Union{cpop_data,mcpop_data}; QUIET=false, gt
     if status == MOI.LOCALLY_SOLVED
         gap = abs(opt-ub)/max(1, abs(ub))
         if gap < gtol
-            println("------------------------------------------------")
-            @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
-            println("Successfully extracted one globally optimal solution.")
-            println("------------------------------------------------")
+            if !QUIET
+                println("------------------------------------------------")
+                @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
+                println("Successfully extracted one globally optimal solution.")
+                println("------------------------------------------------")
+            end
             return rsol,0
         else
-            @printf "Found a locally optimal solution by Ipopt, giving an upper bound: %.8f.\nThe relative optimality gap is: %.6f%%.\n" ub 100*gap
+            if !QUIET
+                @printf "Found a locally optimal solution by Ipopt, giving an upper bound: %.8f.\nThe relative optimality gap is: %.6f%%.\n" ub 100*gap
+            end
             return rsol,1
         end
     else
-        println("The local solver failed refining the solution!")
+        if !QUIET
+            println("The local solver failed refining the solution!")
+        end
         return sol,1
     end
 end
