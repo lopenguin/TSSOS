@@ -28,6 +28,7 @@ mutable struct mcpop_data
     gtol # tolerance for global optimality gap
     ftol # tolerance for feasibility
     flag # 0 if global optimality is certified; 1 otherwise
+    tsupp # low-level data needed to extract solution
 end
 
 """
@@ -40,6 +41,8 @@ If `merge=true`, perform the PSD block merging.
 If `solve=false`, then do not solve the SDP.
 If `Gram=true`, then output the Gram matrix.
 If `MomentOne=true`, add an extra first-order moment PSD constraint to the moment relaxation.
+
+**Modified to also return the suboptimality gap and the JuMP model!**
 
 # Input arguments
 - `pop`: vector of the objective, inequality constraints, and equality constraints
@@ -60,15 +63,17 @@ If `MomentOne=true`, add an extra first-order moment PSD constraint to the momen
 - `opt`: optimum
 - `sol`: (near) optimal solution (if `solution=true`)
 - `data`: other auxiliary data 
+- `gap`: the suboptimality gap (if `solution=true`)
+- `model`: the JuMP model containing the convex SDP relaxation.
 """
 function cs_tssos_first(pop::Vector{Poly{T}}, x, d; nb=0, numeq=0, CS="MF", cliques=[], basis=[], ebasis=[], TS="block", merge=false, md=3, solver="Mosek", 
     dualize=false, QUIET=false, solve=true, solution=false, Gram=false, MomentOne=false, refine=true, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), 
     writetofile=false, rtol=1e-2, gtol=1e-2, ftol=1e-3) where {T<:Number}
     supp,coe = polys_info(pop, x, nb=nb)
-    opt,sol,gap,data = cs_tssos_first(supp, coe, length(x), d, numeq=numeq, nb=nb, CS=CS, cliques=cliques, basis=basis, ebasis=ebasis, TS=TS,
+    opt,sol,data,gap,model = cs_tssos_first(supp, coe, length(x), d, numeq=numeq, nb=nb, CS=CS, cliques=cliques, basis=basis, ebasis=ebasis, TS=TS,
     merge=merge, md=md, QUIET=QUIET, solver=solver, dualize=dualize, solve=solve, solution=solution, Gram=Gram, MomentOne=MomentOne, refine=refine,
     cosmo_setting=cosmo_setting, mosek_setting=mosek_setting, writetofile=writetofile, rtol=rtol, gtol=gtol, ftol=ftol, pop=pop, x=x)
-    return opt,sol,gap,data
+    return opt,sol,data,gap,model
 end
 
 """
@@ -146,11 +151,11 @@ function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0
         mb = maximum(maximum.([maximum.(blocksize[i]) for i = 1:cql]))
         println("Obtained the block structure in $time seconds.\nThe maximal size of blocks is $mb.")
     end
-    opt,ksupp,momone,moment,GramMat,multiplier,SDP_status = solvesdp(m, supp, coe, basis, ebasis, cliques, cql, cliquesize, I, J, ncc, blocks, 
+    opt,ksupp,momone,moment,GramMat,multiplier,SDP_status, model, tsupp = solvesdp(m, supp, coe, basis, ebasis, cliques, cql, cliquesize, I, J, ncc, blocks, 
     eblocks, cl, blocksize, numeq=numeq, nb=nb, QUIET=QUIET, TS=TS, solver=solver, dualize=dualize, solve=solve, solution=solution, MomentOne=MomentOne, 
     Gram=Gram, cosmo_setting=cosmo_setting, mosek_setting=mosek_setting, writetofile=writetofile)
     data = mcpop_data(pop, x, n, nb, m, numeq, supp, coe, basis, ebasis, ksupp, cql, cliquesize, cliques, I, J, ncc, blocksize, blocks, eblocks, GramMat, 
-    multiplier, moment, solver, SDP_status, rtol, gtol, ftol, 1)
+    multiplier, moment, solver, SDP_status, rtol, gtol, ftol, 1, tsupp)
     sol = nothing
     gap = nothing
     if solution == true
@@ -167,7 +172,7 @@ function cs_tssos_first(supp::Vector{Vector{Vector{UInt16}}}, coe, n, d; numeq=0
             end
         end
     end
-    return opt,sol,gap,data
+    return opt,sol,data,gap,model
 end
 
 """
@@ -269,153 +274,161 @@ function solvesdp(m, supp::Vector{Vector{Vector{UInt16}}}, coe, basis, ebasis, c
         ksupp = tsupp
     end
     objv = moment = momone = GramMat = multiplier = SDP_status = nothing
-    if solve == true
-        ltsupp = length(tsupp)
-        if QUIET == false
-            println("Assembling the SDP...")
-            println("There are $ltsupp affine constraints.")
+    
+    # make the JuMP model
+    ltsupp = length(tsupp)
+    if QUIET == false
+        println("Assembling the SDP...")
+        println("There are $ltsupp affine constraints.")
+    end
+    model = Model()
+    set_optimizer_attribute(model, MOI.Silent(), QUIET)
+    time = @elapsed begin
+    cons = [AffExpr(0) for i=1:ltsupp]
+    pos = Vector{Vector{Vector{Union{VariableRef,Symmetric{VariableRef}}}}}(undef, cql)
+    for i = 1:cql
+        if (MomentOne == true || solution == true) && TS != false
+            bs = cliquesize[i]+1
+            pos0 = @variable(model, [1:bs, 1:bs], PSD)
+            for t = 1:bs, r = t:bs
+                if t == 1 && r == 1
+                    bi = UInt16[]
+                elseif t == 1 && r > 1
+                    bi = [cliques[i][r-1]]
+                else
+                    bi = sadd(cliques[i][t-1], cliques[i][r-1], nb=nb)
+                end
+                Locb = bfind(tsupp, ltsupp, bi)
+                if t == r
+                    @inbounds add_to_expression!(cons[Locb], pos0[t,r])
+                else
+                    @inbounds add_to_expression!(cons[Locb], 2, pos0[t,r])
+                end
+            end
         end
+        pos[i] = Vector{Vector{Union{VariableRef,Symmetric{VariableRef}}}}(undef, 1+length(I[i]))
+        pos[i][1] = Vector{Union{VariableRef,Symmetric{VariableRef}}}(undef, cl[i][1])
+        for l = 1:cl[i][1]
+            @inbounds bs = blocksize[i][1][l]
+            if bs == 1
+                pos[i][1][l] = @variable(model, lower_bound=0)
+                @inbounds bi = sadd(basis[i][1][blocks[i][1][l][1]], basis[i][1][blocks[i][1][l][1]], nb=nb)
+                Locb = bfind(tsupp, ltsupp, bi)
+                @inbounds add_to_expression!(cons[Locb], pos[i][1][l])
+            else
+                pos[i][1][l] = @variable(model, [1:bs, 1:bs], PSD)
+                for t = 1:bs, r = t:bs
+                    @inbounds ind1 = blocks[i][1][l][t]
+                    @inbounds ind2 = blocks[i][1][l][r]
+                    @inbounds bi = sadd(basis[i][1][ind1], basis[i][1][ind2], nb=nb)
+                    Locb = bfind(tsupp, ltsupp, bi)
+                    if t == r
+                        @inbounds add_to_expression!(cons[Locb], pos[i][1][l][t,r])
+                    else
+                        @inbounds add_to_expression!(cons[Locb], 2, pos[i][1][l][t,r])
+                    end
+                end
+            end
+        end
+    end
+    ## process inequality constraints
+    for i = 1:cql, (j, w) in enumerate(I[i])
+        pos[i][j+1] = Vector{Union{VariableRef,Symmetric{VariableRef}}}(undef, cl[i][j+1])
+        for l = 1:cl[i][j+1]
+            bs = blocksize[i][j+1][l]
+            if bs == 1
+                pos[i][j+1][l] = @variable(model, lower_bound=0)
+                ind = blocks[i][j+1][l][1]
+                for s = 1:length(supp[w+1])
+                    @inbounds bi = sadd(sadd(basis[i][j+1][ind], supp[w+1][s], nb=nb), basis[i][j+1][ind], nb=nb)
+                    Locb = bfind(tsupp, ltsupp, bi)
+                    @inbounds add_to_expression!(cons[Locb], coe[w+1][s], pos[i][j+1][l])
+                end
+            else
+                pos[i][j+1][l] = @variable(model, [1:bs, 1:bs], PSD)
+                for t = 1:bs, r = t:bs
+                    ind1 = blocks[i][j+1][l][t]
+                    ind2 = blocks[i][j+1][l][r]
+                    for s = 1:length(supp[w+1])
+                        @inbounds bi = sadd(sadd(basis[i][j+1][ind1], supp[w+1][s], nb=nb), basis[i][j+1][ind2], nb=nb)
+                        Locb = bfind(tsupp, ltsupp, bi)
+                        if t == r
+                            @inbounds add_to_expression!(cons[Locb], coe[w+1][s], pos[i][j+1][l][t,r])
+                        else
+                            @inbounds add_to_expression!(cons[Locb], 2*coe[w+1][s], pos[i][j+1][l][t,r])
+                        end
+                    end
+                end
+            end
+        end
+    end
+    ## process equality constraints
+    if numeq > 0
+        free = Vector{Vector{Vector{VariableRef}}}(undef, cql)
+        for i = 1:cql
+            if !isempty(J[i])
+                free[i] = Vector{Vector{VariableRef}}(undef, length(J[i]))
+                for (j, w) in enumerate(J[i])
+                    free[i][j] = @variable(model, [1:length(eblocks[i][j])])
+                    for (u,k) in enumerate(eblocks[i][j]), s = 1:length(supp[w+1])
+                        @inbounds bi = sadd(ebasis[i][j][k], supp[w+1][s], nb=nb)
+                        Locb = bfind(tsupp, ltsupp, bi)
+                        @inbounds add_to_expression!(cons[Locb], coe[w+1][s], free[i][j][u])
+                    end
+                end
+            end
+        end
+    end
+    for i in ncc
+        if i <= m-numeq
+            pos0 = @variable(model, lower_bound=0)
+        else
+            pos0 = @variable(model)
+        end
+        for j = 1:length(supp[i+1])
+            Locb = bfind(tsupp, ltsupp, supp[i+1][j])
+            @inbounds add_to_expression!(cons[Locb], coe[i+1][j], pos0)
+        end
+    end
+    for i = 1:length(supp[1])
+        Locb = bfind(tsupp, ltsupp, supp[1][i])
+        if Locb === nothing
+            @error "The monomial basis is not enough!"
+        else
+            cons[Locb] -= coe[1][i]
+        end
+    end
+    @variable(model, lower)
+    cons[1] += lower
+    @constraint(model, con, cons==zeros(ltsupp))
+    @objective(model, Max, lower)
+    end
+    if QUIET == false
+        println("SDP assembling time: $time seconds.")
+    end
+    if solve == true
+        # set solver params
         if solver == "Mosek"
             if dualize == false
-                model = Model(optimizer_with_attributes(Mosek.Optimizer, "MSK_DPAR_INTPNT_CO_TOL_PFEAS" => mosek_setting.tol_pfeas, "MSK_DPAR_INTPNT_CO_TOL_DFEAS" => mosek_setting.tol_dfeas, 
+                set_optimizer(model, optimizer_with_attributes(Mosek.Optimizer, "MSK_DPAR_INTPNT_CO_TOL_PFEAS" => mosek_setting.tol_pfeas, "MSK_DPAR_INTPNT_CO_TOL_DFEAS" => mosek_setting.tol_dfeas, 
                 "MSK_DPAR_INTPNT_CO_TOL_REL_GAP" => mosek_setting.tol_relgap, "MSK_DPAR_OPTIMIZER_MAX_TIME" => mosek_setting.time_limit, "MSK_IPAR_NUM_THREADS" => mosek_setting.num_threads))
             else
-                model = Model(dual_optimizer(Mosek.Optimizer))
+                set_optimizer(model, dual_optimizer(Mosek.Optimizer))
             end
         elseif solver == "COSMO"
-            model = Model(optimizer_with_attributes(COSMO.Optimizer, "eps_abs" => cosmo_setting.eps_abs, "eps_rel" => cosmo_setting.eps_rel, "max_iter" => cosmo_setting.max_iter, "time_limit" => cosmo_setting.time_limit))
+            set_optimizer(model, optimizer_with_attributes(COSMO.Optimizer, "eps_abs" => cosmo_setting.eps_abs, "eps_rel" => cosmo_setting.eps_rel, "max_iter" => cosmo_setting.max_iter, "time_limit" => cosmo_setting.time_limit))
         elseif solver == "SDPT3"
-            model = Model(optimizer_with_attributes(SDPT3.Optimizer))
+            set_optimizer(model, optimizer_with_attributes(SDPT3.Optimizer))
         elseif solver == "SDPNAL"
-            model = Model(optimizer_with_attributes(SDPNAL.Optimizer))
+            set_optimizer(model, optimizer_with_attributes(SDPNAL.Optimizer))
         else
             @error "The solver is currently not supported!"
         end
-        set_optimizer_attribute(model, MOI.Silent(), QUIET)
-        time = @elapsed begin
-        cons = [AffExpr(0) for i=1:ltsupp]
-        pos = Vector{Vector{Vector{Union{VariableRef,Symmetric{VariableRef}}}}}(undef, cql)
-        for i = 1:cql
-            if (MomentOne == true || solution == true) && TS != false
-                bs = cliquesize[i]+1
-                pos0 = @variable(model, [1:bs, 1:bs], PSD)
-                for t = 1:bs, r = t:bs
-                    if t == 1 && r == 1
-                        bi = UInt16[]
-                    elseif t == 1 && r > 1
-                        bi = [cliques[i][r-1]]
-                    else
-                        bi = sadd(cliques[i][t-1], cliques[i][r-1], nb=nb)
-                    end
-                    Locb = bfind(tsupp, ltsupp, bi)
-                    if t == r
-                        @inbounds add_to_expression!(cons[Locb], pos0[t,r])
-                    else
-                        @inbounds add_to_expression!(cons[Locb], 2, pos0[t,r])
-                    end
-                end
-            end
-            pos[i] = Vector{Vector{Union{VariableRef,Symmetric{VariableRef}}}}(undef, 1+length(I[i]))
-            pos[i][1] = Vector{Union{VariableRef,Symmetric{VariableRef}}}(undef, cl[i][1])
-            for l = 1:cl[i][1]
-                @inbounds bs = blocksize[i][1][l]
-                if bs == 1
-                    pos[i][1][l] = @variable(model, lower_bound=0)
-                    @inbounds bi = sadd(basis[i][1][blocks[i][1][l][1]], basis[i][1][blocks[i][1][l][1]], nb=nb)
-                    Locb = bfind(tsupp, ltsupp, bi)
-                    @inbounds add_to_expression!(cons[Locb], pos[i][1][l])
-                else
-                    pos[i][1][l] = @variable(model, [1:bs, 1:bs], PSD)
-                    for t = 1:bs, r = t:bs
-                        @inbounds ind1 = blocks[i][1][l][t]
-                        @inbounds ind2 = blocks[i][1][l][r]
-                        @inbounds bi = sadd(basis[i][1][ind1], basis[i][1][ind2], nb=nb)
-                        Locb = bfind(tsupp, ltsupp, bi)
-                        if t == r
-                            @inbounds add_to_expression!(cons[Locb], pos[i][1][l][t,r])
-                        else
-                            @inbounds add_to_expression!(cons[Locb], 2, pos[i][1][l][t,r])
-                        end
-                    end
-                end
-            end
-        end
-        ## process inequality constraints
-        for i = 1:cql, (j, w) in enumerate(I[i])
-            pos[i][j+1] = Vector{Union{VariableRef,Symmetric{VariableRef}}}(undef, cl[i][j+1])
-            for l = 1:cl[i][j+1]
-                bs = blocksize[i][j+1][l]
-                if bs == 1
-                    pos[i][j+1][l] = @variable(model, lower_bound=0)
-                    ind = blocks[i][j+1][l][1]
-                    for s = 1:length(supp[w+1])
-                        @inbounds bi = sadd(sadd(basis[i][j+1][ind], supp[w+1][s], nb=nb), basis[i][j+1][ind], nb=nb)
-                        Locb = bfind(tsupp, ltsupp, bi)
-                        @inbounds add_to_expression!(cons[Locb], coe[w+1][s], pos[i][j+1][l])
-                    end
-                else
-                    pos[i][j+1][l] = @variable(model, [1:bs, 1:bs], PSD)
-                    for t = 1:bs, r = t:bs
-                        ind1 = blocks[i][j+1][l][t]
-                        ind2 = blocks[i][j+1][l][r]
-                        for s = 1:length(supp[w+1])
-                            @inbounds bi = sadd(sadd(basis[i][j+1][ind1], supp[w+1][s], nb=nb), basis[i][j+1][ind2], nb=nb)
-                            Locb = bfind(tsupp, ltsupp, bi)
-                            if t == r
-                                @inbounds add_to_expression!(cons[Locb], coe[w+1][s], pos[i][j+1][l][t,r])
-                            else
-                                @inbounds add_to_expression!(cons[Locb], 2*coe[w+1][s], pos[i][j+1][l][t,r])
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        ## process equality constraints
-        if numeq > 0
-            free = Vector{Vector{Vector{VariableRef}}}(undef, cql)
-            for i = 1:cql
-                if !isempty(J[i])
-                    free[i] = Vector{Vector{VariableRef}}(undef, length(J[i]))
-                    for (j, w) in enumerate(J[i])
-                        free[i][j] = @variable(model, [1:length(eblocks[i][j])])
-                        for (u,k) in enumerate(eblocks[i][j]), s = 1:length(supp[w+1])
-                            @inbounds bi = sadd(ebasis[i][j][k], supp[w+1][s], nb=nb)
-                            Locb = bfind(tsupp, ltsupp, bi)
-                            @inbounds add_to_expression!(cons[Locb], coe[w+1][s], free[i][j][u])
-                        end
-                    end
-                end
-            end
-        end
-        for i in ncc
-            if i <= m-numeq
-                pos0 = @variable(model, lower_bound=0)
-            else
-                pos0 = @variable(model)
-            end
-            for j = 1:length(supp[i+1])
-                Locb = bfind(tsupp, ltsupp, supp[i+1][j])
-                @inbounds add_to_expression!(cons[Locb], coe[i+1][j], pos0)
-            end
-        end
-        for i = 1:length(supp[1])
-            Locb = bfind(tsupp, ltsupp, supp[1][i])
-            if Locb === nothing
-               @error "The monomial basis is not enough!"
-            else
-               cons[Locb] -= coe[1][i]
-            end
-        end
-        @variable(model, lower)
-        cons[1] += lower
-        @constraint(model, con, cons==zeros(ltsupp))
-        @objective(model, Max, lower)
-        end
+
         if QUIET == false
-            println("SDP assembling time: $time seconds.")
             println("Solving the SDP...")
         end
+        # solve!
         time = @elapsed begin
         optimize!(model)
         end
@@ -454,12 +467,12 @@ function solvesdp(m, supp::Vector{Vector{Vector{UInt16}}}, coe, basis, ebasis, c
         end
         measure = -dual(con)
         momone = nothing
-        if solution == true  
+        if momone == true || solution == true
             momone = get_moment(measure, tsupp, cliques, cql, cliquesize, nb=nb)
         end
         moment = get_moment(measure, tsupp, cliques, cql, cliquesize, basis=basis, nb=nb)
     end
-    return objv,ksupp,momone,moment,GramMat,multiplier,SDP_status
+    return objv,ksupp,momone,moment,GramMat,multiplier,SDP_status,model,tsupp
 end
 
 function get_eblock(tsupp::Vector{Vector{UInt16}}, hsupp::Vector{Vector{UInt16}}, basis::Vector{Vector{UInt16}}; nb=0, nvar=0, signsymmetry=nothing)
