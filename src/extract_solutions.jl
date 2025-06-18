@@ -461,19 +461,27 @@ function check_solution(candidate_sol, lb, pop::Vector{P}, x; numeq=0, gtol=1e-2
     end
     nsol = length(sol)
     if nsol > 0
-        println("------------------------------------------------")
+        if QUIET == false
+            println("------------------------------------------------")
+        end
         if nsol == 1
             ub = eval_pm(pop[1], x, sol[1])
             gap = abs(lb-ub)/max(1, abs(ub))
-            @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
-            println("Successfully extracted one globally optimal solution.")
+            if QUIET == false
+                @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
+                println("Successfully extracted one globally optimal solution.")
+            end
         else
             ub = minimum([real(eval_pm(pop[1], x, s)) for s in sol])
             gap = abs(lb-ub)/max(1, abs(ub))
-            @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
-            println("Successfully extracted ", nsol, " globally optimal solutions.")
+            if QUIET == false
+                @printf "Global optimality certified with relative optimality gap %.6f%%!\n" 100*gap
+                println("Successfully extracted ", nsol, " globally optimal solutions.")
+            end
         end
-        println("------------------------------------------------")
+        if QUIET == false
+            println("------------------------------------------------")
+        end
     else
         sol = nothing
     end
