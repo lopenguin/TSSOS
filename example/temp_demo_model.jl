@@ -15,7 +15,7 @@ using JuMP
 using MosekTools
 # using Clarabel
 
-# need MomentOne for this to work
+# need MomentOne to extract solution later
 _,_,_,model,data = cs_tssos_first([f], x, 5, TS="block", solve=false, solution=false, MomentOne=true, QUIET=false)
 set_optimizer(model, Mosek.Optimizer) # Mosek.Optimizer also works
 # could add more constraints here
