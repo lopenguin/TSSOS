@@ -42,7 +42,7 @@ If `solve=false`, then do not solve the SDP.
 If `Gram=true`, then output the Gram matrix.
 If `MomentOne=true`, add an extra first-order moment PSD constraint to the moment relaxation.
 
-**Modified to also return the suboptimality gap and the JuMP model!**
+**Modified to also return the suboptimality gap and the JuMP model!** Note that old return syntax still works.
 
 # Input arguments
 - `pop`: vector of the objective, inequality constraints, and equality constraints
