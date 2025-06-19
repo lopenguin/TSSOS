@@ -208,10 +208,11 @@ function cs_tssos_higher!(data::mcpop_data; TS="block", merge=false, md=3, QUIET
             mb = maximum(maximum.([maximum.(blocksize[i]) for i = 1:cql]))
             println("Obtained the block structure in $time seconds.\nThe maximal size of blocks is $mb.")
         end
-        opt,ksupp,momone,moment,GramMat,multiplier,SDP_status = solvesdp(data.m, supp, data.coe, basis, ebasis, cliques, cql, cliquesize, I, J, data.ncc, blocks, eblocks, cl,
+        opt,ksupp,momone,moment,GramMat,multiplier,SDP_status,model,tsupp = solvesdp(data.m, supp, data.coe, basis, ebasis, cliques, cql, cliquesize, I, J, data.ncc, blocks, eblocks, cl,
         blocksize, numeq=numeq, nb=nb, QUIET=QUIET, solver=data.solver, solve=solve, solution=solution, dualize=dualize, MomentOne=MomentOne, 
         Gram=Gram, cosmo_setting=cosmo_setting, mosek_setting=mosek_setting, writetofile=writetofile)
         sol = nothing
+        gap = nothing
         if solution == true
             sol,gap,data.flag = approx_sol(momone, opt, n, cliques, cql, cliquesize, supp, data.coe, numeq=numeq, gtol=data.gtol, ftol=data.ftol, QUIET=true)
             if data.flag == 1
@@ -227,8 +228,9 @@ function cs_tssos_higher!(data::mcpop_data; TS="block", merge=false, md=3, QUIET
         data.multiplier = multiplier
         data.moment = moment
         data.SDP_status = SDP_status
+        data.tsupp = tsupp
     end
-    return opt,sol,data
+    return opt,sol,data,gap,model
 end
 
 function solvesdp(m, supp::Vector{Vector{Vector{UInt16}}}, coe, basis, ebasis, cliques, cql, cliquesize, I, J, ncc, blocks, eblocks, cl, blocksize; 
