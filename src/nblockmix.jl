@@ -32,6 +32,19 @@ mutable struct mcpop_data
 end
 
 """
+    show_blocks(data)
+
+Display the block structure
+"""
+
+function show_blocks(data::mcpop_data)
+    for l = 1:data.cql, j = 1:length(data.blocks[l][1])
+        print("clique $l, block $j: ")
+        println([prod(data.x[data.basis[l][1][data.blocks[l][1][j][k]]]) for k = 1:data.blocksize[l][1][j]])
+    end
+end
+
+"""
     opt,sol,data = cs_tssos_first(pop, x, d; nb=0, numeq=0, CS="MF", cliques=[], basis=[], ebasis=[], TS="block", merge=false, md=3, solver="Mosek", 
     dualize=false, QUIET=false, solve=true, solution=false, Gram=false, MomentOne=false, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), 
     rtol=1e-2, gtol=1e-2, ftol=1e-3)
@@ -425,6 +438,7 @@ function solvesdp(m, supp::Vector{Vector{Vector{UInt16}}}, coe, basis, ebasis, c
             set_optimizer(model, optimizer_with_attributes(SDPNAL.Optimizer))
         else
             @error "The solver is currently not supported!"
+            return nothing,nothing,nothing,nothing,nothing,nothing,nothing
         end
 
         if QUIET == false
@@ -612,9 +626,9 @@ function get_moment(measure, tsupp, cliques, cql, cliquesize; basis=[], nb=0)
         if basis == []
             for j = 1:lb, k = j:lb
                 if j == 1
-                    bi = k == 1 ? UInt16[] : [cliques[i][k-1]]
+                    bi = k == 1 ? UInt16[] : UInt16[cliques[i][k-1]]
                 else
-                    bi = sadd(cliques[i][j-1], cliques[i][k-1], nb=nb)
+                    bi = sadd(UInt16[cliques[i][j-1]], UInt16[cliques[i][k-1]], nb=nb)
                 end
                 Locb = bfind(tsupp, ltsupp, bi)
                 moment[i][j,k] = measure[Locb]

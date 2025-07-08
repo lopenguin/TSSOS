@@ -27,6 +27,18 @@ mutable struct cpop_data
 end
 
 """
+    show_blocks(data)
+
+Display the block structure
+"""
+function show_blocks(data::cpop_data)
+    for j = 1:length(data.blocks[1])
+        print("block $j: ")
+        println([prod(data.x.^data.basis[1][:, data.blocks[1][j][k]]) for k = 1:data.blocksize[1][j]])
+    end
+end
+
+"""
     opt,sol,data = tssos_first(pop, x, d; nb=0, numeq=0, GroebnerBasis=true, basis=[], reducebasis=false, TS="block", 
     merge=false, md=3, solver="Mosek", QUIET=false, solve=true, MomentOne=false, Gram=false, solution=false, 
     cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), normality=false, rtol=1e-2, gtol=1e-2, ftol=1e-3)
@@ -104,13 +116,13 @@ function tssos_first(pop::Vector{Poly{T}}, x, d; nb=0, numeq=0, newton=false, fe
             basis[1] = get_basis(n, d, nb=nb, lead=leadsupp)
         end
         for k = 1:m-neq
-            basis[k+1] = get_basis(n, d-Int(ceil(maxdegree(pop[k+1])/2)), nb=nb, lead=leadsupp)
+            basis[k+1] = get_basis(n, d-Int(ceil(MP.maxdegree(pop[k+1])/2)), nb=nb, lead=leadsupp)
         end
         ebasis = nothing
         if isempty(gb) && numeq > 0
             ebasis = Vector{Array{UInt8,2}}(undef, numeq)
             for k = 1:numeq
-                ebasis[k] = get_basis(n, 2*d-maxdegree(pop[k+1+m-numeq]), nb=nb, lead=leadsupp)
+                ebasis[k] = get_basis(n, 2*d-MP.maxdegree(pop[k+1+m-numeq]), nb=nb, lead=leadsupp)
             end
         end
     end
@@ -192,7 +204,7 @@ If `MomentOne=true`, add an extra first-order moment PSD constraint to the momen
 """
 function tssos_first(f::Poly{T}, x; newton=true, reducebasis=false, TS="block", merge=false, md=3, feasibility=false, solver="Mosek", QUIET=false, solve=true, 
     dualize=false, MomentOne=false, Gram=false, solution=false, cosmo_setting=cosmo_para(), mosek_setting=mosek_para(), rtol=1e-2, gtol=1e-2, ftol=1e-3) where {T<:Number}
-    return tssos_first([f], x, Int(ceil(maxdegree(f)/2)), newton=newton, feasibility=feasibility, GroebnerBasis=false, reducebasis=reducebasis, TS=TS, merge=merge, md=md, solver=solver, 
+    return tssos_first([f], x, Int(ceil(MP.maxdegree(f)/2)), newton=newton, feasibility=feasibility, GroebnerBasis=false, reducebasis=reducebasis, TS=TS, merge=merge, md=md, solver=solver, 
     QUIET=QUIET, solve=solve, dualize=dualize, MomentOne=MomentOne, Gram=Gram, solution=solution, rtol=rtol, gtol=gtol, ftol=ftol, cosmo_setting=cosmo_setting, mosek_setting=mosek_setting)
 end
 
@@ -559,6 +571,7 @@ function solvesdp(n, m, supp, coe, basis, ebasis, blocks, eblocks, cl, blocksize
             model = Model(optimizer_with_attributes(SDPNAL.Optimizer))
         else
             @error "The solver is currently not supported!"
+            return nothing,nothing,nothing,nothing,nothing,nothing,nothing
         end
         set_optimizer_attribute(model, MOI.Silent(), QUIET)
         time = @elapsed begin
@@ -729,6 +742,7 @@ function solvesdp(n, m, supp, coe, basis, ebasis, blocks, eblocks, cl, blocksize
             Locb = bfind(tsupp, ltsupp, supp[1][:,i])
             if Locb === nothing
                 @error "The monomial basis is not enough!"
+                return nothing,nothing,nothing,nothing,nothing,nothing,nothing
             else
                cons[Locb] -= coe[1][i]
             end
@@ -752,74 +766,77 @@ function solvesdp(n, m, supp, coe, basis, ebasis, blocks, eblocks, cl, blocksize
         end
         if QUIET == false
             println("SDP assembling time: $time seconds.")
-            println("Solving the SDP...")
-        end
-        time = @elapsed begin
-        optimize!(model)
-        end
-        if QUIET == false
-            println("SDP solving time: $time seconds.")
         end
         if writetofile != false
             write_to_file(dualize(model), writetofile)
-        end
-        SDP_status = termination_status(model)
-        objv = objective_value(model)
-        if SDP_status != MOI.OPTIMAL
-            if !QUIET
-                println("termination status: $SDP_status")
-                status = primal_status(model)
-                println("solution status: $status")
+        else
+            if QUIET == false
+                println("Solving the SDP...")
             end
-        end
-        println("optimum = $objv")
-        if Gram == true
-            GramMat = Vector{Vector{Union{Float64,Matrix{Float64}}}}(undef, m-neq+1)
-            GramMat[1] = [value.(pos[i]) for i = 1:cl[1]]
-            for k = 1:m-neq
-                GramMat[k+1] = [value.(gpos[k][i]) for i = 1:cl[k+1]]
+            time = @elapsed begin
+            optimize!(model)
             end
-            if neq > 0
-                multiplier = [value.(free[j]) for j = 1:neq]
+            if QUIET == false
+                println("SDP solving time: $time seconds.")
             end
-        end
-        dual_var = -dual(con)
-        moment = Vector{Matrix{Float64}}(undef, cl[1])
-        for i = 1:cl[1]
-            moment[i] = zeros(blocksize[1][i], blocksize[1][i])
-            for j = 1:blocksize[1][i], k = j:blocksize[1][i]
-                bi = bin_add(basis[1][:,blocks[1][i][j]], basis[1][:,blocks[1][i][k]], nb)
-                if !isempty(gb) && divide(bi, lead, n, llead)
-                    bi_lm,bi_supp,bi_coe = reminder(bi, x, gb, n)
-                    moment[i][j,k] = 0
-                    for l = 1:bi_lm
-                        Locb = bfind(tsupp, ltsupp, bi_supp[:,l])
-                        moment[i][j,k] += bi_coe[l]*dual_var[Locb]
-                    end
-                else
-                    Locb = bfind(tsupp, ltsupp, bi)
-                    moment[i][j,k] = dual_var[Locb]
+            SDP_status = termination_status(model)
+            objv = objective_value(model)
+            if SDP_status != MOI.OPTIMAL
+                if !QUIET
+                    println("termination status: $SDP_status")
+                    status = primal_status(model)
+                    println("solution status: $status")
                 end
             end
-            moment[i] = Symmetric(moment[i],:U)
-        end
-        if solution == true
-            momone = zeros(Float64, n+1, n+1)
-            for j = 1:n+1, k = j:n+1
-                bi = bin_add(basis[1][:,j], basis[1][:,k], nb)
-                if !isempty(gb) && divide(bi, lead, n, llead)
-                    bi_lm,bi_supp,bi_coe = reminder(bi, x, gb, n)
-                    momone[j,k] = 0
-                    for l = 1:bi_lm
-                        Locb = bfind(tsupp, ltsupp, bi_supp[:,l])
-                        momone[j,k] += bi_coe[l]*dual_var[Locb]
-                    end
-                else
-                    Locb = bfind(tsupp, ltsupp, bi)
-                    momone[j,k] = dual_var[Locb]
+            println("optimum = $objv")
+            if Gram == true
+                GramMat = Vector{Vector{Union{Float64,Matrix{Float64}}}}(undef, m-neq+1)
+                GramMat[1] = [value.(pos[i]) for i = 1:cl[1]]
+                for k = 1:m-neq
+                    GramMat[k+1] = [value.(gpos[k][i]) for i = 1:cl[k+1]]
+                end
+                if neq > 0
+                    multiplier = [value.(free[j]) for j = 1:neq]
                 end
             end
-            momone = Symmetric(momone,:U)
+            dual_var = -dual(con)
+            moment = Vector{Matrix{Float64}}(undef, cl[1])
+            for i = 1:cl[1]
+                moment[i] = zeros(blocksize[1][i], blocksize[1][i])
+                for j = 1:blocksize[1][i], k = j:blocksize[1][i]
+                    bi = bin_add(basis[1][:,blocks[1][i][j]], basis[1][:,blocks[1][i][k]], nb)
+                    if !isempty(gb) && divide(bi, lead, n, llead)
+                        bi_lm,bi_supp,bi_coe = reminder(bi, x, gb, n)
+                        moment[i][j,k] = 0
+                        for l = 1:bi_lm
+                            Locb = bfind(tsupp, ltsupp, bi_supp[:,l])
+                            moment[i][j,k] += bi_coe[l]*dual_var[Locb]
+                        end
+                    else
+                        Locb = bfind(tsupp, ltsupp, bi)
+                        moment[i][j,k] = dual_var[Locb]
+                    end
+                end
+                moment[i] = Symmetric(moment[i],:U)
+            end
+            if solution == true
+                momone = zeros(Float64, n+1, n+1)
+                for j = 1:n+1, k = j:n+1
+                    bi = bin_add(basis[1][:,j], basis[1][:,k], nb)
+                    if !isempty(gb) && divide(bi, lead, n, llead)
+                        bi_lm,bi_supp,bi_coe = reminder(bi, x, gb, n)
+                        momone[j,k] = 0
+                        for l = 1:bi_lm
+                            Locb = bfind(tsupp, ltsupp, bi_supp[:,l])
+                            momone[j,k] += bi_coe[l]*dual_var[Locb]
+                        end
+                    else
+                        Locb = bfind(tsupp, ltsupp, bi)
+                        momone[j,k] = dual_var[Locb]
+                    end
+                end
+                momone = Symmetric(momone,:U)
+            end
         end
     end
     return objv,ksupp,moment,momone,GramMat,multiplier,SDP_status
