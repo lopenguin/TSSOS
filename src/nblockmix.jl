@@ -311,7 +311,7 @@ function solvesdp(m, supp::Vector{Vector{Vector{UInt16}}}, coe, basis, ebasis, c
                 elseif t == 1 && r > 1
                     bi = [cliques[i][r-1]]
                 else
-                    bi = sadd(cliques[i][t-1], cliques[i][r-1], nb=nb)
+                    bi = sadd(UInt16[cliques[i][t-1]], UInt16[cliques[i][r-1]], nb=nb)
                 end
                 Locb = bfind(tsupp, ltsupp, bi)
                 if t == r
