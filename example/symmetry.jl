@@ -3,8 +3,24 @@ using DynamicPolynomials
 using TSSOS
 using JuMP
 using MosekTools
-using Profile
-using ProfileView
+# using Profile
+# using ProfileView
+
+@polyvar x[1:5]
+f = 1/5*sum(x.^4) + 1/5*(x[1]*x[2]*x[3]*x[4]+x[1]*x[2]*x[3]*x[5]+x[1]*x[2]*x[4]*x[5]+x[1]*x[3]*x[4]*x[5]+x[2]*x[3]*x[4]*x[5]) + 
+1/10*(x[1]*x[2]*x[3]+x[1]*x[2]*x[4]+x[1]*x[3]*x[4]+x[2]*x[3]*x[4]+x[1]*x[2]*x[5]+x[1]*x[3]*x[5]+x[1]*x[4]*x[5]+x[2]*x[3]*x[5]+x[2]*x[4]*x[5]+x[3]*x[4]*x[5]) + 1/5*sum(x)
+G = PermGroup([perm"(1,2)", perm"(1,2,3,4,5)"])
+opt,data = tssos_symmetry_first([f], x, 2, G, TS="MD")
+opt,data = tssos_symmetry_higher!(data, TS="MD")
+
+
+@polyvar x[1:4]
+f = sum(x) + sum(x.^2) + prod(x)
+g = [1-x[1]^2, 1-2x[2]^2, 1-3x[3]^2, 1-4x[4]^2, x[1]*x[2]-0.2]
+G = PermGroup([perm"(1,2)", perm"(1,2,3,4)"]) # define the symmetry group
+opt,data = tssos_symmetry([f; g], x, 2, G, SymmetricConstraint=false)
+opt,sol,data = tssos_first([f; g], x, 2, TS=false, solution=true)
+
 
 @polyvar x[1:7]
 f = sum(x) + sum(x.^2)
@@ -13,6 +29,7 @@ G = PermGroup([perm"(1,2)", perm"(1,2,3,4,5,6,7)"]) # define the symmetry group
 Profile.print()
 # optimum = -1
 
+using SymbolicWedderburn
 action = TSSOS.VariablePermutation(x)
 supp_d = TSSOS.get_basis(Vector(1:length(x)), 2)
 supp_2d = TSSOS.get_basis(Vector(1:length(x)), 4)
