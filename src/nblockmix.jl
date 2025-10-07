@@ -443,8 +443,8 @@ function solvesdp(m, supp::Vector{Vector{Vector{UInt16}}}, coe, basis, ebasis, c
         elseif solver == "SDPNAL"
             set_optimizer(model, optimizer_with_attributes(SDPNAL.Optimizer))
         else
-            @error "The solver is currently not supported!"
-            return nothing,nothing,nothing,nothing,nothing,nothing,nothing
+            @warn "solver may not be supported. Good luck!"
+            set_optimizer(model, solver)
         end
 
         if QUIET == false
